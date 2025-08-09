@@ -15,7 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from app.clickhouse_logger import log_event
+from app.clickhouse_logger import log_event, ensure_clickhouse, ch_status
 from app.ws_manager import WebSocketManager
 from app.game_logic import CrashGame
 from app.db import init_db, get_or_create_user, update_balance, get_balance
@@ -25,7 +25,6 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 if not BOT_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN не задан в окружении контейнера.")
 BOT_ID = int(BOT_TOKEN.split(":", 1)[0])
-
 
 # Prod публичный ключ Telegram (Ed25519) в hex — из официальной доки Mini Apps
 TMA_PUBLIC_KEY_HEX_PROD = "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d"
@@ -61,7 +60,6 @@ def _validate_hash(init_data: str, bot_token: str) -> Tuple[bool, Optional[Dict[
         return False, None, "missing_hash"
 
     check_string, data = _sorted_pairs_without(init_data, "hash", "signature")
-
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     calc_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
 
@@ -89,7 +87,6 @@ def _validate_hash(init_data: str, bot_token: str) -> Tuple[bool, Optional[Dict[
 
 
 def _b64url_decode_with_padding(s: str) -> bytes:
-    # Telegram присылает base64url без padding — добавим его
     pad = (-len(s)) % 4
     if pad:
         s = s + ("=" * pad)
@@ -98,9 +95,7 @@ def _b64url_decode_with_padding(s: str) -> bytes:
 
 def _validate_signature(init_data: str, bot_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """
-    Новый способ (third-party validation):
-    сообщение = f"{bot_id}:WebAppData\n" + data_check_string (без hash и signature)
-    проверяем Ed25519 подпись из поля 'signature' публичным ключом Telegram.
+    Новый способ (third-party validation).
     """
     from nacl.signing import VerifyKey
     from nacl.exceptions import BadSignatureError
@@ -111,7 +106,6 @@ def _validate_signature(init_data: str, bot_id: str) -> Tuple[bool, Optional[Dic
         return False, None, "missing_signature"
 
     check_string, data = _sorted_pairs_without(init_data, "hash", "signature")
-
     message = f"{bot_id}:WebAppData\n{check_string}".encode()
 
     pubkey = bytes.fromhex(TMA_PUBLIC_KEY_HEX_PROD)
@@ -147,13 +141,9 @@ def _validate_signature(init_data: str, bot_id: str) -> Tuple[bool, Optional[Dic
 
 
 def validate_init_data(init_data: str, bot_token: str, bot_id: Optional[str]) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """
-    Пытаемся по-старому (hash). Если не сошлось — по-новому (signature).
-    """
     ok, user, reason = _validate_hash(init_data, bot_token)
     if ok:
         return ok, user, reason
-
     if bot_id:
         return _validate_signature(init_data, bot_id)
     return False, None, reason
@@ -214,15 +204,13 @@ async def game_loop():
         await asyncio.sleep(5)
 
 
-@app.websocket("/ws")  # без завершающего слэша
+@app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # 1) Принять сокет один раз здесь
     await websocket.accept()
 
     init_data_str: Optional[str] = None
     user_obj: Optional[Dict[str, Any]] = None
 
-    # 2) Пробуем initData из query (?initData=...)
     try:
         q_init = websocket.query_params.get("initData")
         if q_init:
@@ -233,7 +221,6 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.warning(f"WS query parse error: {e}")
 
-    # 3) Если не прошёл query — ждём первое сообщение-handshake
     if not init_data_str:
         try:
             first = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
@@ -253,7 +240,6 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception as e:
             logger.exception(f"WS handshake receive error: {e}")
 
-    # 4) Нет валидных данных — закрываем
     if not init_data_str or not user_obj:
         logger.warning("Invalid initData. Closing connection.")
         await websocket.close(code=1008, reason="Invalid credentials")
@@ -262,33 +248,37 @@ async def websocket_endpoint(websocket: WebSocket):
     user_id = str(user_obj["id"])
     username = user_obj.get("username")
 
-    # 5) Логируем источник (start_param)
     try:
-        from urllib.parse import parse_qsl, unquote
         parsed_qsl = dict(parse_qsl(unquote(init_data_str)))
         user_source = json.loads(parsed_qsl.get("user", "{}")).get("start_param")
     except Exception:
         user_source = None
 
-    log_event(int(user_id), "user_connect", {"username": username}, user_source)
+    # ✅ фикс: передаём именованные аргументы в log_event
+    try:
+        asyncio.create_task(
+            log_event(
+                event_type="user_connect",
+                user_id=int(user_id),
+                payload={"username": username},
+                user_source=user_source,
+            )
+        )
+    except Exception:
+        pass
+
     get_or_create_user(int(user_id), username)
 
-    # 6) Регистрируем подключение (НЕ вызывать accept() внутри менеджера!)
     await manager.connect(websocket, user_id)
     logger.info(f"User {user_id} ({username}) connected.")
 
-    # 7) Отправляем текущее состояние и основной цикл
     try:
         history_data = [{"multiplier": item["multiplier"]} for item in game.history]
 
         if game.start_time:
             initial_message = {
                 "type": "round_start",
-                "data": {
-                    "startTime": game.start_time,
-                    "history": history_data,
-                    "is_initial_sync": True
-                }
+                "data": {"startTime": game.start_time, "history": history_data, "is_initial_sync": True}
             }
         else:
             initial_message = {
@@ -313,10 +303,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     panel_id=int(data.get("panelId")),
                     bet_data={
                         "amount": float(data.get("amount")),
-                        "autoCashoutAt": (
-                            float(data.get("autoCashoutAt"))
-                            if data.get("autoCashoutAt") else None
-                        ),
+                        "autoCashoutAt": (float(data.get("autoCashoutAt")) if data.get("autoCashoutAt") else None),
                     },
                 )
             elif msg_type == "cash_out":
@@ -375,20 +362,56 @@ async def telegram_webhook(request: Request):
 
         current_balance = get_balance(user_id)
         is_ftd = current_balance == 0
-        log_event(user_id, "successful_payment", {
-            "amount": amount_paid,
-            "currency": payment_info.get("currency", "XTR"),
-            "is_ftd": is_ftd
-        })
 
-        new_balance = update_balance(user_id, float(amount_paid), is_delta=True)
+        # ✅ фикс: именованные аргументы
+        try:
+            asyncio.create_task(
+                log_event(
+                    event_type="successful_payment",
+                    user_id=user_id,
+                    payload={
+                        "amount": amount_paid,
+                        "currency": payment_info.get("currency", "XTR"),
+                        "is_ftd": is_ftd
+                    },
+                    user_source=None,
+                )
+            )
+        except Exception:
+            pass
+
+        new_balance = update_balance(user_id, float(amount_paid), op="inc")
         await manager.send_to_user(str(user_id), {"type": "balance_update", "data": {"balance": new_balance}})
         logger.info(f"User {user_id} successfully paid {amount_paid}. New balance: {new_balance}")
 
     return {"status": "ok"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ---- Админ-диагностика CH ----
+
+@app.get("/admin/ensure_clickhouse")
+async def admin_ensure_clickhouse():
+    status = await ensure_clickhouse()
+    return status
+
+
+@app.get("/admin/ch_status")
+async def admin_ch_status():
+    status = await ch_status()
+    return status
+
+
 @app.on_event("startup")
 async def on_startup():
     init_db()
+    try:
+        st = await ensure_clickhouse()
+        logger.info(f"[CH] ensure on startup: created={st.get('created')} type={st.get('payload_type')} error={st.get('error')}")
+    except Exception as e:
+        logger.warning(f"ensure_clickhouse failed: {e}")
     asyncio.create_task(game_loop())

@@ -90,6 +90,9 @@ cp .env.example .env   # и заполни значения
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 # фронт+api будут доступны через Caddy на http://localhost:8080
 
+Включаем с clickhouse
+# в .env поставь CLICKHOUSE_ENABLED=1
+docker compose -f docker-compose.yml -f docker-compose.clickhouse.yml up -d --build
 
 ## Автор
 Разработано anvaesiDev и Hollow в 2025 году.

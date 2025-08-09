@@ -18,6 +18,10 @@ skill-forge-factory.ru {
   # HTTP-эндпоинты API (same-origin)
   reverse_proxy /create-star-invoice backend:8000
   reverse_proxy /webhook/telegram    backend:8000
+
+  # admin/health маршруты на backend
+  reverse_proxy /health              backend:8000
+  reverse_proxy /admin/*             backend:8000
 }
 
 api.skill-forge-factory.ru {
