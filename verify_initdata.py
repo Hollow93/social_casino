@@ -10,3 +10,4 @@ calc = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
 print("OK? ", calc == given_hash)
 print("calc", calc)
 print("giv ", given_hash)
+
