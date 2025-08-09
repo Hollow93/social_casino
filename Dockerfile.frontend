@@ -1,0 +1,7 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY ./social_casino_frontend /app
+
+EXPOSE 80
+CMD ["python3", "-m", "http.server", "80"]

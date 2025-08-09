@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+httpx
+PyNaCl==1.5.0
