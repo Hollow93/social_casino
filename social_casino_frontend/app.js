@@ -602,7 +602,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
             );
-            return;
         }
 
         if ((gameState === "waiting" || state.autoBet) && state.status === "idle") {
