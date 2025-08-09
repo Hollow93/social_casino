@@ -6,6 +6,18 @@ skill-forge-factory.ru {
   root * /srv/frontend
   file_server
   encode gzip zstd
+
+  # WebSocket на том же домене
+  @ws {
+    path /ws*
+    header Connection *Upgrade*
+    header Upgrade websocket
+  }
+  reverse_proxy @ws backend:8000
+
+  # HTTP-эндпоинты API (same-origin)
+  reverse_proxy /create-star-invoice backend:8000
+  reverse_proxy /webhook/telegram    backend:8000
 }
 
 api.skill-forge-factory.ru {
@@ -16,5 +28,5 @@ api.skill-forge-factory.ru {
   }
 
   reverse_proxy @ws backend:8000
-  reverse_proxy / backend:8000
+  reverse_proxy /  backend:8000
 }
