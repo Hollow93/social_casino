@@ -1,0 +1,20 @@
+{
+  # отключаем email/ACME — локальный режим
+  auto_https off
+}
+
+:80 {
+  # фронт
+  root * /srv/frontend
+  file_server
+  encode gzip zstd
+
+  @ws {
+    path /ws*
+    header Connection *Upgrade*
+    header Upgrade websocket
+  }
+
+  reverse_proxy @ws backend:8000
+  reverse_proxy / backend:8000
+}

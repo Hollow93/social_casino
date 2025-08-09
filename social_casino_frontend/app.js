@@ -93,11 +93,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ======= CONFIG =======
     // WebSocket API домен (проксируется Caddy на backend:8000)
-    const WEBSOCKET_URL = "wss://api.skill-forge-factory.ru";
+    const WS_SCHEME = location.protocol === "https:" ? "wss" : "ws";
+    const WEBSOCKET_URL = `${WS_SCHEME}://${location.host}`;
     const WS_PATH = "/ws";
 
     // HTTP API (инвойсы Stars)
-    const API_BASE = "https://api.skill-forge-factory.ru";
+    const API_BASE = "";
 
     // ======= DOM refs =======
     const multiplierDisplayEl = document.getElementById("multiplier-display");

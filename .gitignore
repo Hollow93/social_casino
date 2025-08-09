@@ -1,0 +1,7 @@
+social_casino_backend/social_casino.db
+.venv/
+__pycache__/
+*.pyc
+*.log
+.env
+.idea

@@ -85,5 +85,11 @@ docker compose restart
 docker compose logs -f backend
 ```
 
+Запуск локально:
+cp .env.example .env   # и заполни значения
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# фронт+api будут доступны через Caddy на http://localhost:8080
+
+
 ## Автор
 Разработано anvaesiDev и Hollow в 2025 году.

@@ -1,0 +1,8 @@
+services:
+  caddy:
+    volumes:
+      - ./social_casino_frontend:/srv/frontend:ro
+      - ./infra/caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8080:80"
+      - "8443:443"

@@ -6,9 +6,8 @@ services:
     build:
       context: .
       dockerfile: infra/backend/Dockerfile
-    environment:
-      TELEGRAM_BOT_TOKEN: "8111352574:AAGC-ax46qx_JEkG1inM375Cz-BXTbc-fPw"
-      TELEGRAM_BOT_ID: "8111352574"
+    env_file:
+      - .env
     expose:
       - "8000"
     networks:
@@ -28,19 +27,18 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2.7
-    depends_on:
-      - frontend
-      - backend
+    image: caddy:2
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # Статика фронта монтируется в каталог, откуда Caddy её отдаёт
       - ./social_casino_frontend:/srv/frontend:ro
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    depends_on:
+      - frontend
+      - backend
     networks:
       - webnet
     restart: unless-stopped
